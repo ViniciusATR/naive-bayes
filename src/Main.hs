@@ -100,10 +100,12 @@ main :: IO ()
 main = do
       print "Digite o path do dataset"
       pds <- getLine
-      ds <- return $ parseStringDataset $ readFile pds
+      r   <- readFile pds
+      ds  <- return $ parseStringDataset r
       print "Digite o path do target"
       ptg <- getLine
-      tg <- return $ parseTarget $ readFile ptg
+      r   <- readFile ptg
+      tg  <- return $ parseTarget r
       print $ map (predict (trainNB ds)) tg
 
 
