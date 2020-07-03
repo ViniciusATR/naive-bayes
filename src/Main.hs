@@ -3,6 +3,7 @@ module Main where
 import Data.List
 import Data.List.Extra (groupSortBy)
 import Data.List.Split (splitOn)
+import Data.Bifunctor
 import Data.Ord
 import Control.Lens
 
@@ -28,7 +29,6 @@ sd xs = sqrt variance
   where
     m = mean xs
     variance = mean $ map (\x -> (x-m)^2) xs
-
 
 --                  Dataframe por classe   (Classe, vetor de médias, vetor de DesvPad)
 summarizeClasses :: [(Int, [[Double]])] -> [(Int, [Double], [Double])]
@@ -66,7 +66,7 @@ trainNB dt = zipWith (\g p -> (fst g, snd g , snd p)) gaussians priors
     priors = computePriors grouped
 
 --                     feats       (classe, likelihoods, prior)            (classe, coef)
-calculateClassCoef :: [Double] -> (Int , [(Double -> Double)] , Double) -> (Int , Double)
+calculateClassCoef :: [Double] -> (Int , [Double -> Double] , Double) -> (Int , Double)
 calculateClassCoef feats (cls, gss, p) = (cls, p * likelihood)
   where
     featProbs = zipWith (\x y -> x y) gss feats
