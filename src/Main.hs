@@ -1,66 +1,61 @@
 module Main where
 
 import Data.List
+import Data.List.Extra (groupSortBy)
 import Data.List.Split (splitOn)
+import Data.Bifunctor
 import Data.Ord
 import Control.Lens
 
 --  (Classe, distribuiçoes, prior)
-type Model = [(Int, [(Double -> Double)] , Double )]
+type Model = [(Int, [Double -> Double] , Double )]
 
 --           Dataset         pontos individuais agrupados por classes
 separate :: [([Double], Int)] -> [(Int, [[Double]])]
 separate dt = map fixTuple grouped
   where
-    fixTuple tpl = (head $ snd tpl , fst tpl)
-    grouped = map unzip $ groupBy (\x y -> snd x == snd y) sorted
-    sorted  = sortBy (comparing snd) dt
+    fixTuple tpl = (head $ snd tpl , transpose $ fst tpl)
+    grouped = map unzip $ groupSortBy (\x y -> snd x `compare` snd y) dt
 
---            Matriz de feats  Vetor de médias
-calculateMean :: [[Double]] -> [Double]
-calculateMean dt = map (/fromIntegral (length dt)) sum
-  where
-    len  = length $ head dt
-    base = take len $ repeat 0.0
-    sum  = foldr (\x y -> zipWith (+) x y) base dt
 
---          Matriz de feats  Vetor de desvio padrão
-calculateSD :: [[Double]] -> [Double]
-calculateSD dt = map sqrt variance
+mean :: [Double] -> Double
+mean xs = sum / len
   where
-    len  = length $ head dt
-    base = take len $ repeat 0.0
-    mean = calculateMean dt
-    squaredSubMean = map (map (^2)) $ map (\x -> zipWith (-) x mean) dt
-    sum  = foldr (\x y -> zipWith (+) x y) base dt
-    variance = map (/fromIntegral (length dt) ) sum
+    (sum, len) = foldr (\x y -> (x + fst y, snd y + 1.0)) (0.0, 0.0) xs
+
+
+sd :: [Double] -> Double
+sd xs = sqrt variance
+  where
+    m = mean xs
+    variance = mean $ map (\x -> (x-m)^2) xs
 
 --                  Dataframe por classe   (Classe, vetor de médias, vetor de DesvPad)
 summarizeClasses :: [(Int, [[Double]])] -> [(Int, [Double], [Double])]
-summarizeClasses dt = map summarizeClass dt
+summarizeClasses  = map summarizeClass
   where
-    summarizeClass cls = (fst cls, calculateMean $ snd cls, calculateSD $ snd cls)
+    summarizeClass cls = (fst cls, map mean $ snd cls, map sd $ snd cls)
 
 --                Media     DesvPad      Gaussiana
 createGaussian :: Double -> Double -> (Double -> Double)
-createGaussian m dp = (\x -> factor * exp (exponential x))
+createGaussian m dp = \x -> factor * exp (exponential x)
   where
     factor = 1.0 / (dp * sqrt (2 * pi))
     exponential x = (-0.5) * ((x - m)/dp)^2
 
 --          (Classe, vetor de médias, vetor de DesvPad) (Classe, [distribuições gaussianas])
-createGaussians :: [(Int, [Double], [Double])] -> [(Int, [(Double -> Double)])]
-createGaussians dt = map gaussians dt
+createGaussians :: [(Int, [Double], [Double])] -> [(Int, [Double -> Double])]
+createGaussians = map gaussians
   where
-    gaussians ( id , m , dp )  =  (id, zipWith (createGaussian) m dp)
+    gaussians ( id , m , dp )  =  (id, zipWith createGaussian m dp)
 
 --               Dataframe por classe   (classe, prior)
 computePriors :: [(Int, [[Double]])] -> [(Int, Double)]
 computePriors dt = map prior individualSums
   where
     individualSums = map (\(id, ls) -> (id, length ls)) dt
-    total = foldr (+) 0 $ map snd individualSums
-    prior (id, len) = (id, (fromIntegral len)/(fromIntegral total) )
+    total = foldr ((+).snd) 0 individualSums
+    prior (id, len) = (id, fromIntegral len/fromIntegral total )
 
 --           Dataset treino
 trainNB :: [([Double], Int)] -> Model
@@ -71,7 +66,7 @@ trainNB dt = zipWith (\g p -> (fst g, snd g , snd p)) gaussians priors
     priors = computePriors grouped
 
 --                     feats       (classe, likelihoods, prior)            (classe, coef)
-calculateClassCoef :: [Double] -> (Int , [(Double -> Double)] , Double) -> (Int , Double)
+calculateClassCoef :: [Double] -> (Int , [Double -> Double] , Double) -> (Int , Double)
 calculateClassCoef feats (cls, gss, p) = (cls, p * likelihood)
   where
     featProbs = zipWith (\x y -> x y) gss feats
@@ -101,12 +96,9 @@ main = do
       print "Digite o path do dataset"
       pds <- getLine
       r   <- readFile pds
-      ds  <- return $ parseStringDataset r
+      let ds = parseStringDataset r
       print "Digite o path do target"
       ptg <- getLine
       r   <- readFile ptg
-      tg  <- return $ parseTarget r
+      let tg = parseTarget r
       print $ map (predict (trainNB ds)) tg
-
-
---  print $ map (predict (trainNB iris_train)) iris_test
