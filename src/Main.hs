@@ -1,27 +1,67 @@
+{-# LANGUAGE BangPatterns              #-}
+{-# LANGUAGE ExistentialQuantification #-}
+
 module Main where
 
+import Data.Monoid
 import Data.List
+import qualified Data.Bifunctor as B
 import Data.List.Extra (groupSortBy)
 import Data.List.Split (splitOn)
-import Data.Bifunctor
 import Data.Ord
-import Control.Lens
+import Data.Tuple
+import Control.Lens hiding(Fold)
+
+import qualified Data.Foldable as F
+
+---------------
+-- Fold code --
+---------------
+
+data Fold i o = forall m . Monoid m => Fold (i -> m) (m -> o)
+
+data Average a = Average { numerator :: !a , denominator :: !Int }
+
+instance Num a => Semigroup (Average a) where
+  (Average x nx) <> (Average y ny) = Average ( x + y ) ( nx + ny )
+
+instance Num a => Monoid (Average a) where
+  mempty = Average 0 0
+
+fold :: Fold i o -> [i] -> o
+fold (Fold liftContext process ) is = process ( reduce (map liftContext is))
+  where reduce = F.foldl'(<>) mempty
+
+average :: Fractional a => Fold a a
+average = Fold liftContext process
+  where
+    liftContext x = Average x 1
+
+    process (Average numerator denominator) = numerator / fromIntegral denominator
+
+
+----------------------
+-- Naive Bayes code --
+----------------------
+
 
 --  (Classe, distribuiçoes, prior)
 type Model = [(Int, [Double -> Double] , Double )]
 
---           Dataset         pontos individuais agrupados por classes
+--           Dataset         valores de colunas agrupados por classes
 separate :: [([Double], Int)] -> [(Int, [[Double]])]
 separate dt = map fixTuple grouped
   where
-    fixTuple tpl = (head $ snd tpl , transpose $ fst tpl)
-    grouped = map unzip $ groupSortBy (\x y -> snd x `compare` snd y) dt
+    fixTuple tpl = swap $ B.bimap transpose head tpl
+    grouped = map unzip $ groupSortBy (\x y -> snd x `compare` snd y) dt --comparewithsecond procurar
 
 
 mean :: [Double] -> Double
-mean xs = sum / len
-  where
-    (sum, len) = foldr (\x y -> (x + fst y, snd y + 1.0)) (0.0, 0.0) xs
+mean xs = fold average xs
+
+  -- sum / len
+  -- where
+  --   (sum, len) = foldr (\x y -> (x + fst y, snd y + 1.0)) (0.0, 0.0) xs
 
 
 sd :: [Double] -> Double
@@ -53,7 +93,7 @@ createGaussians = map gaussians
 computePriors :: [(Int, [[Double]])] -> [(Int, Double)]
 computePriors dt = map prior individualSums
   where
-    individualSums = map (\(id, ls) -> (id, length ls)) dt
+    individualSums = map (B.second length) dt
     total = foldr ((+).snd) 0 individualSums
     prior (id, len) = (id, fromIntegral len/fromIntegral total )
 
