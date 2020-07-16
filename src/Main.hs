@@ -20,6 +20,18 @@ import qualified Data.Foldable as F
 
 data Fold i o = forall m . Monoid m => Fold (i -> m) (m -> o)
 
+instance Functor (Fold i) where
+  fmap f (Fold liftContext process) = Fold liftContext ( f . process )
+
+instance Applicative (Fold i) where
+  pure f = Fold (\_ -> ()) (\_ -> f)
+
+  Fold liftContextF processF <*> Fold liftContextX processX = Fold liftContext process
+    where
+      liftContext i = (liftContextF i, liftContextX i)
+
+      process ( contextualizedF, contextualizedX ) = processF contextualizedF (processX contextualizedX)
+
 data Average a = Average { numerator :: !a , denominator :: !Int }
 
 instance Num a => Semigroup (Average a) where
@@ -36,6 +48,13 @@ average :: Fractional a => Fold a a
 average = Fold liftContext process
   where
     liftContext x = Average x 1
+
+    process (Average numerator denominator) = numerator / fromIntegral denominator
+
+variance :: Fractional a => a -> Fold a a
+variance avg = Fold liftContext process
+  where
+    liftContext x = Average (( x - avg )^2) 1
 
     process (Average numerator denominator) = numerator / fromIntegral denominator
 
@@ -59,16 +78,14 @@ separate dt = map fixTuple grouped
 mean :: [Double] -> Double
 mean xs = fold average xs
 
-  -- sum / len
-  -- where
-  --   (sum, len) = foldr (\x y -> (x + fst y, snd y + 1.0)) (0.0, 0.0) xs
-
 
 sd :: [Double] -> Double
-sd xs = sqrt variance
-  where
-    m = mean xs
-    variance = mean $ map (\x -> (x-m)^2) xs
+sd xs = sqrt $ fold (variance m) xs
+  where m = mean xs
+-- sd xs = sqrt variance
+--   where
+--     m = mean xs
+--     variance = mean $ map (\x -> (x-m)^2) xs
 
 --                  Dataframe por classe   (Classe, vetor de médias, vetor de DesvPad)
 summarizeClasses :: [(Int, [[Double]])] -> [(Int, [Double], [Double])]
