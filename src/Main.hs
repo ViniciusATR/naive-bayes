@@ -32,13 +32,21 @@ instance Applicative (Fold i) where
 
       process ( contextualizedF, contextualizedX ) = processF contextualizedF (processX contextualizedX)
 
-data Average a = Average { numerator :: !a , denominator :: !Int }
+data Average a = Average { cSum :: !a , count :: !Int }
 
 instance Num a => Semigroup (Average a) where
   (Average x nx) <> (Average y ny) = Average ( x + y ) ( nx + ny )
 
 instance Num a => Monoid (Average a) where
   mempty = Average 0 0
+
+data Variance a = Variance { csum :: !a , sqsum :: !a , n :: !Int }
+
+instance Num a => Semigroup (Variance a) where
+  (Variance csa sqsa na) <> (Variance csb sqsb nb) = Variance (csa + csb) (sqsa + sqsb) (na + nb)
+
+instance Num a => Monoid (Variance a) where
+  mempty = Variance 0 0 0
 
 fold :: Fold i o -> [i] -> o
 fold (Fold liftContext process ) is = process ( reduce (map liftContext is))
@@ -49,15 +57,13 @@ average = Fold liftContext process
   where
     liftContext x = Average x 1
 
-    process (Average numerator denominator) = numerator / fromIntegral denominator
+    process (Average cSum count) = cSum / fromIntegral count
 
-variance :: Fractional a => a -> Fold a a
-variance avg = Fold liftContext process
+variance :: Fractional a => Fold a a
+variance = Fold liftContext process
   where
-    liftContext x = Average (( x - avg )^2) 1
-
-    process (Average numerator denominator) = numerator / fromIntegral denominator
-
+    liftContext x = Variance x (x^2) 1
+    process (Variance csum sqsum count) = sqsum / fromIntegral count - (csum / fromIntegral count ) ^ 2
 
 ----------------------
 -- Naive Bayes code --
@@ -80,12 +86,7 @@ mean xs = fold average xs
 
 
 sd :: [Double] -> Double
-sd xs = sqrt $ fold (variance m) xs
-  where m = mean xs
--- sd xs = sqrt variance
---   where
---     m = mean xs
---     variance = mean $ map (\x -> (x-m)^2) xs
+sd xs = sqrt $ fold variance xs
 
 --                  Dataframe por classe   (Classe, vetor de médias, vetor de DesvPad)
 summarizeClasses :: [(Int, [[Double]])] -> [(Int, [Double], [Double])]
