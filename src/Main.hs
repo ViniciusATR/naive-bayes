@@ -98,7 +98,7 @@ combine = liftA2 (,)
 
 stats = combine average (fmap sqrt variance)
 
-freq :: (Ord o, Fractional a) => Fold (o,a) [(o,a)]
+freq :: (Ord o, Fractional a) => Fold (o,i) [(o,a)]
 freq = extractFreq <$> countTotalPartial
   where
     integralPartial p = map (B.second fromIntegral) p
@@ -146,13 +146,9 @@ createGaussians = map gaussians
   where
     gaussians ( id , m , dp )  =  (id, zipWith createGaussian m dp)
 
---               Dataframe por classe   (classe, prior)
-computePriors :: [(Int, [[Double]])] -> [(Int, Double)]
-computePriors dt = map prior individualSums
-  where
-    individualSums = map (B.second length) dt
-    total = foldr ((+).snd) 0 individualSums
-    prior (id, len) = (id, fromIntegral len/fromIntegral total )
+--               Dataframe inteiro   (classe, prior)
+computePriors :: [([Double], Int)] -> [(Int, Double)]
+computePriors dt = fold freq $ map swap dt
 
 --           Dataset treino
 trainNB :: [([Double], Int)] -> Model
@@ -160,7 +156,7 @@ trainNB dt = zipWith (\g p -> (fst g, snd g , snd p)) gaussians priors
   where
     grouped = separate dt
     gaussians = createGaussians $ summarizeClasses grouped
-    priors = computePriors grouped
+    priors = computePriors dt
 
 --                     feats       (classe, likelihoods, prior)            (classe, coef)
 calculateClassCoef :: [Double] -> (Int , [Double -> Double] , Double) -> (Int , Double)
