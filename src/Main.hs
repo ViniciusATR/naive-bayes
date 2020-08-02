@@ -3,9 +3,10 @@
 
 module Main where
 
-import Data.Monoid
-import Data.List
-import qualified Data.Bifunctor as B
+import Prelude hiding (sum)
+import Data.Monoid hiding (Sum)
+import Control.Applicative
+import Data.List hiding (sum)
 import Data.List.Extra (groupSortBy)
 import Data.List.Split (splitOn)
 import Data.Ord
@@ -13,6 +14,8 @@ import Data.Tuple
 import Control.Lens hiding(Fold)
 
 import qualified Data.Foldable as F
+import qualified Data.Map.Strict as Map
+import qualified Data.Bifunctor as B
 
 ---------------
 -- Fold code --
@@ -32,39 +35,75 @@ instance Applicative (Fold i) where
 
       process ( contextualizedF, contextualizedX ) = processF contextualizedF (processX contextualizedX)
 
-data Average a = Average { cSum :: !a , count :: !Int }
+data Count = Count !Int deriving(Show)
 
-instance Num a => Semigroup (Average a) where
-  (Average x nx) <> (Average y ny) = Average ( x + y ) ( nx + ny )
+instance Semigroup Count where
+  Count ca <> Count cb = Count ( ca + cb )
 
-instance Num a => Monoid (Average a) where
-  mempty = Average 0 0
+instance Monoid Count where
+  mempty = Count 0
 
-data Variance a = Variance { csum :: !a , sqsum :: !a , n :: !Int }
+data Sum a = Sum !a deriving(Show)
 
-instance Num a => Semigroup (Variance a) where
-  (Variance csa sqsa na) <> (Variance csb sqsb nb) = Variance (csa + csb) (sqsa + sqsb) (na + nb)
+instance Num a => Semigroup (Sum a) where
+  Sum xa <> Sum xb = Sum ( xa + xb )
 
-instance Num a => Monoid (Variance a) where
-  mempty = Variance 0 0 0
+instance Num a => Monoid (Sum a) where
+  mempty = Sum 0
+
+newtype GroupBy k a = GroupBy { groupMap :: Map.Map k a } deriving(Show)
+
+instance (Monoid a, Ord k) => Semigroup (GroupBy k a) where
+  GroupBy xa <> GroupBy xb = GroupBy (Map.unionWith (<>) xa xb)
+
+instance (Monoid a, Ord k) => Monoid (GroupBy k a) where
+  mempty = GroupBy (Map.empty)
 
 fold :: Fold i o -> [i] -> o
-fold (Fold liftContext process ) is = process ( reduce (map liftContext is))
+fold (Fold liftContext process ) is = process (reduce (map liftContext is))
   where reduce = F.foldl'(<>) mempty
 
-average :: Fractional a => Fold a a
-average = Fold liftContext process
+count = Fold liftContext process
   where
-    liftContext x = Average x 1
+    liftContext _ = Count 1
+    process (Count c) = c
 
-    process (Average cSum count) = cSum / fromIntegral count
+groupByF :: Ord a => Fold i o -> Fold (a, i) [(a, o)]
+groupByF (Fold l p) = Fold liftContext process
+  where
+    liftContext (k,v) = GroupBy ( uncurry Map.singleton $ B.second l (k,v))
+    process (GroupBy m) = map (B.second p) $ Map.toList m
+
+sum :: Fractional a => Fold a a
+sum = Fold liftContext process
+  where
+    liftContext x = Sum x
+    process (Sum x) = x
+
+sqsum :: Fractional a => Fold a a
+sqsum = Fold liftContext process
+  where
+    liftContext x = Sum ( x ^ 2 )
+    process (Sum x) = x
+
+average :: Fractional a => Fold a a
+average = (/) <$> sum <*> ( fmap fromIntegral count )
 
 variance :: Fractional a => Fold a a
-variance = Fold liftContext process
-  where
-    liftContext x = Variance x (x^2) 1
-    process (Variance csum sqsum count) = sqsum / fromIntegral count - (csum / fromIntegral count ) ^ 2
+variance = (-) <$> avgSqrs <*> (fmap (^2) average)
+  where avgSqrs = (/) <$> sqsum <*> ( fmap fromIntegral count )
 
+combine :: Fold i a -> Fold i b -> Fold i (a, b)
+combine = liftA2 (,)
+
+stats = combine average (fmap sqrt variance)
+
+freq :: (Ord o, Fractional a) => Fold (o,a) [(o,a)]
+freq = extractFreq <$> countTotalPartial
+  where
+    integralPartial p = map (B.second fromIntegral) p
+    extractFreq (c,p) = map (B.second (/fromIntegral c)) (integralPartial p)
+    countTotalPartial = combine count (groupByF count)
 ----------------------
 -- Naive Bayes code --
 ----------------------
@@ -86,7 +125,7 @@ mean xs = fold average xs
 
 
 sd :: [Double] -> Double
-sd xs = sqrt $ fold variance xs
+sd xs = fold (fmap sqrt variance) xs
 
 --                  Dataframe por classe   (Classe, vetor de médias, vetor de DesvPad)
 summarizeClasses :: [(Int, [[Double]])] -> [(Int, [Double], [Double])]
