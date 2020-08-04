@@ -93,10 +93,13 @@ variance :: Fractional a => Fold a a
 variance = (-) <$> avgSqrs <*> (fmap (^2) average)
   where avgSqrs = (/) <$> sqsum <*> ( fmap fromIntegral count )
 
+sdf :: Floating a => Fold a a
+sdf = fmap sqrt variance
+
 combine :: Fold i a -> Fold i b -> Fold i (a, b)
 combine = liftA2 (,)
 
-stats = combine average (fmap sqrt variance)
+stats = combine average sdf
 
 freq :: (Ord o, Fractional a) => Fold (o,i) [(o,a)]
 freq = extractFreq <$> countTotalPartial
@@ -104,6 +107,15 @@ freq = extractFreq <$> countTotalPartial
     integralPartial p = map (B.second fromIntegral) p
     extractFreq (c,p) = map (B.second (/fromIntegral c)) (integralPartial p)
     countTotalPartial = combine count (groupByF count)
+
+groupFeats :: Ord o => Fold (o,[i]) [(o,[[i]])]
+groupFeats = fmap (map (B.second transpose)) (groupByF feats)
+  where
+    feats = Fold liftContext process
+      where
+        liftContext x = [x]
+        process ls = ls
+
 ----------------------
 -- Naive Bayes code --
 ----------------------
@@ -114,18 +126,13 @@ type Model = [(Int, [Double -> Double] , Double )]
 
 --           Dataset         valores de colunas agrupados por classes
 separate :: [([Double], Int)] -> [(Int, [[Double]])]
-separate dt = map fixTuple grouped
-  where
-    fixTuple tpl = swap $ B.bimap transpose head tpl
-    grouped = map unzip $ groupSortBy (\x y -> snd x `compare` snd y) dt --comparewithsecond procurar
-
+separate dt = fold groupFeats $ map swap dt
 
 mean :: [Double] -> Double
 mean xs = fold average xs
 
-
 sd :: [Double] -> Double
-sd xs = fold (fmap sqrt variance) xs
+sd xs = fold sdf xs
 
 --                  Dataframe por classe   (Classe, vetor de médias, vetor de DesvPad)
 summarizeClasses :: [(Int, [[Double]])] -> [(Int, [Double], [Double])]
@@ -171,6 +178,9 @@ predict m tg = fst bestFit
     clsCoefs = map (calculateClassCoef tg) m
     bestFit = foldr (\x y -> if snd x >= snd y then x else y) (head clsCoefs) clsCoefs
 
+----------------------
+-- Parse de dataset --
+----------------------
 parseStringDataset :: String -> [([Double], Int)]
 parseStringDataset s = map transform tpl
   where
